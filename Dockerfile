@@ -10,15 +10,18 @@ FROM alpine:3.20
 RUN apk add --no-cache \
     python3 \
     py3-pip \
+    py3-venv \
     chromium \
     nss \
     freetype \
     harfbuzz \
     ca-certificates \
     ttf-freefont
-RUN pip3 install --no-cache-dir apify
 WORKDIR /app
 COPY --from=builder /app/google-maps-scraper .
 COPY apify_wrapper.py .
+RUN python3 -m venv /venv && \
+    /venv/bin/pip install --no-cache-dir apify
+ENV PATH="/venv/bin:$PATH"
 ENV ROD_CHROMIUM_PATH=/usr/bin/chromium-browser
 ENTRYPOINT ["python3", "apify_wrapper.py"]
