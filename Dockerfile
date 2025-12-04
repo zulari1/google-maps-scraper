@@ -1,65 +1,35 @@
-# Build stage for Playwright dependencies
-FROM ubuntu:20.04 AS playwright-deps
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-#ENV PLAYWRIGHT_DRIVER_PATH=/opt/
-RUN export PATH=$PATH:/usr/local/go/bin:/root/go/bin \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl wget \
-    && wget -q https://go.dev/dl/go1.25.3.linux-amd64.tar.gz \
-    && tar -C /usr/local -xzf go1.25.3.linux-amd64.tar.gz \
-    && rm go1.25.3.linux-amd64.tar.gz \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && go install github.com/playwright-community/playwright-go/cmd/playwright@latest \
-    && mkdir -p /opt/browsers \
-    && playwright install chromium --with-deps
-
-# Build stage
-FROM golang:1.25.3-trixie AS builder
+# Build the Go binary
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /usr/bin/google-maps-scraper
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o google-maps-scraper
 
-# Final stage
-FROM debian:trixie-slim
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-ENV PLAYWRIGHT_DRIVER_PATH=/opt
+# Final minimal image
+FROM alpine:3.20
 
-# Install only the necessary dependencies in a single layer
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install Python + Apify SDK + Chromium (needed for rod)
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
     ca-certificates \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxkbcommon0 \
-    libatspi2.0-0 \
-    libx11-6 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    ttf-freefont
 
-COPY --from=playwright-deps /opt/browsers /opt/browsers
-COPY --from=playwright-deps /root/.cache/ms-playwright-go /opt/ms-playwright-go
+# Install Apify SDK
+RUN pip3 install --no-cache-dir apify
 
-RUN chmod -R 755 /opt/browsers \
-    && chmod -R 755 /opt/ms-playwright-go
+# Copy binary
+WORKDIR /app
+COPY --from=builder /app/google-maps-scraper .
+COPY apify_wrapper.py .
 
-COPY --from=builder /usr/bin/google-maps-scraper /usr/bin/
+# Tell rod where Chromium is
+ENV ROD_CHROMIUM_PATH=/usr/bin/chromium-browser
 
-ENTRYPOINT ["google-maps-scraper"]
+# Apify entrypoint
+ENTRYPOINT ["python3", "apify_wrapper.py"]
