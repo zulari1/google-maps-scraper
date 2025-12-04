@@ -10,7 +10,6 @@ FROM alpine:3.20
 RUN apk add --no-cache \
     python3 \
     py3-pip \
-    py3-venv \
     chromium \
     nss \
     freetype \
